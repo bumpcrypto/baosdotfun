@@ -1,24 +1,42 @@
 {
   "name": "baosdotfun",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "lint": "next lint"
   },
   "dependencies": {
-    "@rainbow-me/rainbowkit": "^2.2.1",
-    "@tanstack/react-query": "^5.55.3",
-    "next": "^14.2.10",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "viem": "2.17.0",
-    "wagmi": "^2.12.17"
+    "@prisma/client": "^5.7.1",
+    "@tsparticles/engine": "^3.0.3",
+    "@tsparticles/react": "^3.0.0",
+    "@tsparticles/slim": "^3.0.3",
+    "@vercel/postgres": "^0.5.1",
+    "autoprefixer": "^10.4.16",
+    "clsx": "^2.0.0",
+    "framer-motion": "^12.0.0-alpha.1",
+    "next": "14.0.4",
+    "postcss": "^8.4.32",
+    "prisma": "^5.7.1",
+    "react": "19.0.0-rc-66855b96-20241106",
+    "react-dom": "19.0.0-rc-66855b96-20241106",
+    "shadcn-ui": "^0.5.0",
+    "tailwind-merge": "^2.2.0",
+    "tailwindcss": "^3.4.0",
+    "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
-    "@types/node": "^20.14.8",
-    "@types/react": "^18.3.5",
-    "typescript": "5.5.2"
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "typescript": "^5"
+  },
+  "overrides": {
+    "framer-motion": {
+      "react": "19.0.0-rc-66855b96-20241106",
+      "react-dom": "19.0.0-rc-66855b96-20241106"
+    }
   }
 }
