@@ -326,7 +326,7 @@ export default function Home() {
                       onChange={(e) => setFormData({ ...formData, wantsToStartBao: e.target.checked })}
                       className="sr-only peer"
                     />
-                    <div className="w-11 h-6 bg-gray-800/50 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-honey"></div>
+                    <div className="w-11 h-6 bg-gray-800/50 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[&apos;&apos;] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-honey"></div>
                     <span className="ms-3 text-sm font-medium">I want to start my own BAO</span>
                   </label>
                 </div>
@@ -376,7 +376,7 @@ export default function Home() {
                     </motion.div>
                   </div>
                   <p className="text-center text-base sm:text-lg">
-                    Thank you for joining the BAO whitelist! We'll keep you updated on our launch.
+                    Thank you for joining the BAO whitelist! We will keep you updated on our launch.
                   </p>
                   <div className="flex justify-center pt-4">
                     <a 
