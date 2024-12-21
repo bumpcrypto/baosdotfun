@@ -10,19 +10,18 @@
   },
   "dependencies": {
     "@prisma/client": "^5.7.1",
-    "@tsparticles/engine": "^3.0.3",
+    "@tsparticles/engine": "^3.0.2",
     "@tsparticles/react": "^3.0.0",
-    "@tsparticles/slim": "^3.0.3",
+    "@tsparticles/slim": "^3.0.2",
     "@vercel/postgres": "^0.5.1",
     "autoprefixer": "^10.4.16",
     "clsx": "^2.0.0",
-    "framer-motion": "^12.0.0-alpha.1",
+    "framer-motion": "^10.16.16",
     "next": "14.0.4",
     "postcss": "^8.4.32",
     "prisma": "^5.7.1",
-    "react": "19.0.0-rc-66855b96-20241106",
-    "react-dom": "19.0.0-rc-66855b96-20241106",
-    "shadcn-ui": "^0.5.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "tailwind-merge": "^2.2.0",
     "tailwindcss": "^3.4.0",
     "tailwindcss-animate": "^1.0.7"
@@ -32,11 +31,5 @@
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "typescript": "^5"
-  },
-  "overrides": {
-    "framer-motion": {
-      "react": "19.0.0-rc-66855b96-20241106",
-      "react-dom": "19.0.0-rc-66855b96-20241106"
-    }
   }
 }

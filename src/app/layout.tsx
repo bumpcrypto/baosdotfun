@@ -1,12 +1,13 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { Inter, Outfit } from 'next/font/google'
 import './globals.css'
 
 const inter = Inter({ subsets: ['latin'] })
+const outfit = Outfit({ subsets: ['latin'], variable: '--font-outfit' })
 
 export const metadata: Metadata = {
-  title: 'Baos.fun - Coming to Berachain in Q5',
-  description: 'Get whitelisted for Baos.fun on Berachain',
+  title: 'baos.fun - Coming to Berachain in Q5',
+  description: 'Custom AI Agents for Berachain yield farming',
 }
 
 export default function RootLayout({
@@ -15,7 +16,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className={`${outfit.variable} dark`}>
       <body className={`${inter.className} min-h-screen bg-black`}>{children}</body>
     </html>
   )
