@@ -177,7 +177,7 @@ export default function Home() {
                         className="rounded-2xl"
                       />
                     </div>
-                    <span className="font-outfit text-base text-honey/80 group-hover:text-honey transition-colors duration-300">Baos</span>
+                    <span className="font-outfit text-base text-honey/80 group-hover:text-honey transition-colors duration-300">baos 🐻</span>
                   </a>
 
                   <div className="flex flex-col items-center group cursor-pointer" onClick={() => setShowBElizaModal(true)}>
@@ -208,7 +208,7 @@ export default function Home() {
                   title="bEliza - AI Agent Framework"
                 >
                   <p>
-                    bEliza is an OS AI agent framework that democratizes AI deployment on Berachain. It provides the infrastructure and tools needed for anyone to create and ship their own AI agents on the Berachain ecosystem.
+                    bEliza is an OS AI agent framework that democratizes AI agent deployment on Berachain. It provides the infrastructure and tools needed for anyone to create and ship their own AI agents for any protocol on Berachain. Coming in Q5
                   </p>
                 </Modal>
               </div>
