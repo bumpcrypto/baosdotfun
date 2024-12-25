@@ -13,12 +13,324 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Existing waitlist model - stores the 7k users who signed up for early access
+// DO NOT MODIFY as it contains production data
 model WhitelistEntry {
   id              String   @id @default(cuid())
-  address         String   @unique
-  telegram        String?
-  twitter         String?
+  address         String   @unique      // User's wallet address
+  telegram        String?               // Optional telegram handle
+  twitter         String?               // Optional twitter handle
   wantsToStartBao Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+// ============= BAO System Enums =============
+
+// Defines the type of BAO fund
+enum BAOType {
+  AGENT_FUND    // Managed by AI agents
+  CURATED_FUND  // Manually curated investments
+}
+
+// Current state of a BAO in its lifecycle
+enum BAOStatus {
+  FUNDRAISING   // Currently accepting investments
+  COMING_SOON   // Announced but not yet fundraising
+  ACTIVE        // Fundraising complete and operating
+  ENDED         // BAO has completed its lifecycle
+}
+
+// Status of a BAO season
+enum SeasonStatus {
+  ACTIVE        // Current ongoing season
+  UPCOMING      // Future planned season
+  COMPLETED     // Past season
+}
+
+// Status for whitelist applications
+enum WhitelistStatus {
+  PENDING       // Application under review
+  APPROVED      // User approved for whitelist
+  REJECTED      // Application rejected
+}
+
+// Different tiers of whitelist access with varying privileges
+enum WhitelistTier {
+  PROTOCOL_ENGAGEMENT  // Tier 1: Active protocol users & high Yap engagement
+  NFT_HOLDER          // Tier 2: Holders of specific NFT collections
+  GENERAL_LOTTERY     // Tier 3: General public lottery system
+  STRATEGIC           // Tier 4: Reserved for strategic partners
+  STAKER             // Tier 5: BAO token stakers with priority access
+}
+
+// Operational status of AI agents
+enum AgentStatus {
+  ACTIVE        // Agent is running and executing strategies
+  PAUSED        // Temporarily stopped but can resume
+  OFFLINE       // Completely inactive
+}
+
+// Different strategy types an agent can specialize in
+enum AgentSpecialization {
+  YIELD_FARMING         // Farming yields across protocols
+  TRADING              // Active trading strategies
+  LIQUIDITY_PROVISION  // Providing liquidity to AMMs
+  ARBITRAGE            // Cross-protocol arbitrage
+  GOVERNANCE           // Participating in governance
+}
+
+// Berachain protocols that BAOs can interact with
+enum Protocol {
+  KODIAK          // Uniswap V3 fork
+  HONEY           // Lending
+  MEME_SWAP       // Memecoin swaps
+  YEET            // Protocol
+  OOGA_BOOGA      // Protocol
+  INFRARED        // Protocol
+  BEX             // Protocol
+  CORE            // Protocol
+  DOLOMITE        // Protocol
+  STAKE_STONE     // Protocol
+  SHOGUN          // Protocol
+}
+
+// Type of announcement
+enum AnnouncementType {
+  GENERAL       // General updates
+  INVESTMENT    // New investment announcements
+  PERFORMANCE   // Performance updates
+  TECHNICAL     // Technical updates/maintenance
+}
+
+// Type of transaction
+enum TransactionType {
+  INVESTMENT    // New investment made
+  HARVEST       // Yield harvest
+  REBALANCE     // Portfolio rebalancing
+  GOVERNANCE    // Governance action
+  MULTISIG      // Multisig operation
+}
+
+// ============= Core BAO Models =============
+
+// Main BAO entity - represents a single BAO fund
+model BAO {
+  id            String         @id @default(uuid())
+  name          String                  // Display name of the BAO
+  type          BAOType                 // Type of fund
+  status        BAOStatus               // Current lifecycle status
+  season        Season         @relation(fields: [seasonId], references: [id])
+  seasonId      Int                     // Which season this BAO belongs to
+  marketCap     Float                   // Current market capitalization
+  aum           Float                   // Assets Under Management
+  memberCount   Int                     // Number of token holders
+  logo          String                  // BAO logo URL
+  bannerImage   String?                 // Optional banner image URL
+  description   String                  // BAO description
+  isTestnet     Boolean        @default(false)  // Whether this is a testnet BAO
+  
+  // Token Information
+  tokenAddress  String                  // BAO token contract address
+  poolAddresses String[]                // Array of liquidity pool addresses
+  
+  supportedBy   String[]               // List of supporting protocols/partners
+  farmProtocols Protocol[]             // List of protocols this BAO interacts with
+  
+  // Relations
+  assets        BAOAsset[]             // Assets held by this BAO
+  whitelist     BAOWhitelist[]         // Whitelist entries
+  agents        BAOAgent[]             // AI agents managing this BAO
+  
+  // Social Components
+  team          TeamMember[]      // Team members
+  announcements Announcement[]    // Team announcements
+  transactions  Transaction[]     // Significant transactions
+  chatMessages  ChatMessage[]     // Alpha chat messages
+  
+  // Timestamps
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([seasonId])
+}
+
+// Represents a season of BAO launches
+model Season {
+  id        Int           @id @default(autoincrement())
+  name      String                  // Season name (e.g., "Season 1")
+  status    SeasonStatus           // Current season status
+  startDate DateTime               // Season start date
+  endDate   DateTime               // Season end date
+  maxBAOs   Int                    // Maximum number of BAOs in this season
+  baos      BAO[]                  // BAOs launched in this season
+}
+
+// Tracks assets held by each BAO
+model BAOAsset {
+  id            String    @id @default(uuid())
+  bao           BAO       @relation(fields: [baoId], references: [id])
+  baoId         String
+  tokenAddress  String                // Contract address of the token
+  symbol        String                // Token symbol
+  amount        Float                 // Amount held
+  value         Float                 // USD value of holdings
+  lastUpdated   DateTime  @updatedAt  // Last time holdings were updated
+
+  @@index([baoId])
+}
+
+// Manages whitelist applications and status
+model BAOWhitelist {
+  id                String          @id @default(uuid())
+  bao              BAO             @relation(fields: [baoId], references: [id])
+  baoId            String
+  user             User            @relation(fields: [userId], references: [id])
+  userId           String
+  status           WhitelistStatus          // Application status
+  tier             WhitelistTier            // Assigned tier
+  
+  // Tier qualification metrics
+  protocolActivity Float?                   // Protocol engagement score
+  yapActivity      Float?                   // Yap/Twitter activity score
+  nftHoldings      String[]                 // Held NFT collection addresses
+  beraBalance      Float?                   // BERA token balance
+  hasTransaction   Boolean         @default(false)  // Has made a transaction
+  
+  // Timestamps
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([baoId])
+  @@index([userId])
+  @@unique([baoId, userId])  // One whitelist entry per user per BAO
+}
+
+// Handles protocol-wide BAO token staking
+model BAOStaking {
+  id            String    @id @default(uuid())
+  user          User      @relation(fields: [userId], references: [id])
+  userId        String
+  stakerAddress String    // Wallet address that staked
+  amount        Float     // Amount of BAO tokens staked
+  startTime     DateTime  @default(now())
+  endTime       DateTime? // Optional end time if unstaked
+  rewards       Float     @default(0)  // Accumulated rewards
+
+  @@index([userId])
+  @@index([stakerAddress])
+}
+
+// Core user model for BAO interactions
+model User {
+  id            String         @id @default(cuid())
+  address       String         @unique  // User's wallet address
+  baoWhitelists BAOWhitelist[]         // User's whitelist applications
+  baoStaking    BAOStaking[]           // User's staking positions
+  chatMessages  ChatMessage[]          // Alpha chat messages
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+// AI agents that manage BAO operations
+model BAOAgent {
+  id              String                @id @default(uuid())
+  bao             BAO                   @relation(fields: [baoId], references: [id])
+  baoId           String
+  
+  // Agent identity
+  name            String                // Agent's name
+  profilePic      String                // Profile picture URL
+  characterBio    String                // Character description/backstory
+  status          AgentStatus           @default(PAUSED)
+  specializations AgentSpecialization[] // Agent's capabilities
+  
+  // Security & Access Control
+  publicKey       String                // Agent's public key
+  encryptedKey    String                // Encrypted private key
+  gnosisSafe      String                // Gnosis Safe address
+  safeThreshold   Int                   // Required signature count
+  safeOwners      String[]              // Safe owner addresses
+  
+  // Configuration & Performance
+  plugins         Json                  // Plugin configurations
+  performanceData Json?                 // Performance metrics
+  lastActive      DateTime?             // Last activity timestamp
+  
+  // Relations
+  chatMessages    ChatMessage[]         // Chat messages from this agent
+  
+  // Timestamps
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  @@index([baoId])
+}
+
+// Team members associated with BAOs
+model TeamMember {
+  id            String         @id @default(uuid())
+  bao           BAO            @relation(fields: [baoId], references: [id])
+  baoId         String
+  name          String                // Team member's name
+  role          String                // Role in the team
+  profilePic    String                // Profile picture URL
+  address       String                // Wallet address
+  twitter       String?               // Twitter handle
+  announcements Announcement[]        // Announcements made by this team member
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([baoId])
+}
+
+// Team announcements and updates
+model Announcement {
+  id          String           @id @default(uuid())
+  bao         BAO              @relation(fields: [baoId], references: [id])
+  baoId       String
+  type        AnnouncementType
+  title       String
+  content     String           @db.Text
+  author      TeamMember       @relation(fields: [authorId], references: [id])
+  authorId    String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([baoId])
+  @@index([authorId])
+}
+
+// Track significant transactions
+model Transaction {
+  id          String          @id @default(uuid())
+  bao         BAO             @relation(fields: [baoId], references: [id])
+  baoId       String
+  type        TransactionType
+  txHash      String          // Transaction hash
+  description String          // Human-readable description
+  amount      Float           // Transaction amount
+  token       String          // Token involved
+  timestamp   DateTime        @default(now())
+
+  @@index([baoId])
+  @@index([txHash])
+}
+
+// Alpha chat messages with AI agents
+model ChatMessage {
+  id          String    @id @default(uuid())
+  bao         BAO       @relation(fields: [baoId], references: [id])
+  baoId       String
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String
+  agent       BAOAgent  @relation(fields: [agentId], references: [id])
+  agentId     String
+  content     String    @db.Text
+  isAgent     Boolean   @default(false)  // Whether message is from agent or user
+  timestamp   DateTime  @default(now())
+
+  @@index([baoId])
+  @@index([userId])
+  @@index([agentId])
 }
