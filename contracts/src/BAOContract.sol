@@ -6,11 +6,12 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {TickMath} from "@uniswap/v3-core/contracts/libraries/TickMath.sol";
 import {INonfungiblePositionManager, IUniswapV3Factory, ILockerFactory, ILocker} from "./interface.sol";
-import {IERC721Receiver} from "./LPLocker/IERC721Receiver.sol";
+import {IERC721Receiver} from "./LPLocker/IERC721Reciever.sol";
 import {DaosWorldV1Token} from "./DaosWorldV1Token.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IHoneyLocker} from "./IHoneyLocker.sol";
 
-contract DaosWorldV1 is Ownable, ReentrancyGuard {
+contract BAOContract is Ownable, ReentrancyGuard {
     using SafeERC20 for ERC20;
     using TickMath for int24;
 
@@ -22,6 +23,16 @@ contract DaosWorldV1 is Ownable, ReentrancyGuard {
     address public constant WETH = 0x4200000000000000000000000000000000000006;
     ILockerFactory public liquidityLockerFactory;
     address public liquidityLocker;
+    IHoneyLocker public honeyLocker;
+
+    // Tier-based lock periods (in days)
+    mapping(uint256 => uint256) public tierLockPeriods;
+    // Track LP positions and their lock data
+    mapping(uint256 => address) public lpPositionOwner;
+    mapping(uint256 => uint256) public lpPositionTier;
+    mapping(uint256 => uint256) public lpPositionLockExpiry;
+
+    event LPPositionLocked(uint256 indexed tokenId, address indexed owner, uint256 tier, uint256 lockExpiry);
 
     uint256 public totalRaised;
     uint256 public fundraisingGoal;
@@ -34,7 +45,7 @@ contract DaosWorldV1 is Ownable, ReentrancyGuard {
     address public protocolAdmin;
     string public name;
     string public symbol;
-    address public daoToken;
+    address public baoToken;
 
     // If maxWhitelistAmount > 0, then its whitelist only. And this is the max amount you can contribute.
     uint256 public maxWhitelistAmount;
@@ -53,6 +64,14 @@ contract DaosWorldV1 is Ownable, ReentrancyGuard {
     event AddWhitelist(address);
     event RemoveWhitelist(address);
 
+    // Events for new functionality
+    event LPUnstaked(uint256 indexed tokenId, address indexed owner);
+    event RewardsClaimed(address indexed user, uint256 amount);
+    event TokensBurned(address indexed user, uint256 baoAmount, uint256 beraAmount);
+
+    // Event for BAO delegation
+    event BAODelegated(address indexed user, uint128 amount, address indexed validator);
+
     constructor(
         uint256 _fundraisingGoal,
         string memory _name,
@@ -63,7 +82,8 @@ contract DaosWorldV1 is Ownable, ReentrancyGuard {
         address _liquidityLockerFactory,
         uint256 _maxWhitelistAmount,
         address _protocolAdmin,
-        uint256 _maxPublicContributionAmount
+        uint256 _maxPublicContributionAmount,
+        address _honeyLocker
     ) Ownable(_daoManager) {
         require(_fundraisingGoal > 0, "Fundraising goal must be greater than 0");
         require(_fundraisingDeadline > block.timestamp, "_fundraisingDeadline > block.timestamp");
@@ -77,6 +97,14 @@ contract DaosWorldV1 is Ownable, ReentrancyGuard {
         maxWhitelistAmount = _maxWhitelistAmount;
         protocolAdmin = _protocolAdmin;
         maxPublicContributionAmount = _maxPublicContributionAmount;
+        honeyLocker = IHoneyLocker(_honeyLocker);
+
+        // Set default lock periods for each tier (in days)
+        tierLockPeriods[1] = 1 days;  // Tier 1: 1 day
+        tierLockPeriods[2] = 2 days;  // Tier 2: 2 days
+        tierLockPeriods[3] = 3 days;  // Tier 3: 3 days
+        tierLockPeriods[4] = 4 days;  // Tier 4: 4 days
+        tierLockPeriods[5] = 5 days;  // Tier 5: 5 days
     }
 
     function contribute() public payable nonReentrant {
@@ -153,61 +181,86 @@ contract DaosWorldV1 is Ownable, ReentrancyGuard {
         maxPublicContributionAmount = _maxPublicContributionAmount;
     }
 
-    // Finalize the fundraising and distribute tokens
-    function finalizeFundraising(int24 initialTick, int24 upperTick, bytes32 salt) external onlyOwner {
+    // Function to set tier lock periods
+    function setTierLockPeriod(uint256 tier, uint256 lockPeriod) external {
+        require(msg.sender == owner() || msg.sender == protocolAdmin, "Must be owner or protocolAdmin");
+        require(tier > 0 && tier <= 5, "Invalid tier");
+        require(lockPeriod > 0, "Lock period must be > 0");
+        tierLockPeriods[tier] = lockPeriod;
+    }
+
+    // Modified finalizeFundraising to handle single-sided LP
+    function finalizeFundraising(
+        int24 initialTick, 
+        int24 upperTick, 
+        bytes32 salt,
+        uint256[] memory contributorTiers
+    ) external onlyOwner {
         require(goalReached, "Fundraising goal not reached");
-        require(!fundraisingFinalized, "DAO tokens already minted");
+        require(!fundraisingFinalized, "BAO tokens already minted");
+        require(contributors.length == contributorTiers.length, "Arrays length mismatch");
 
         DaosWorldV1Token token = new DaosWorldV1Token{salt: salt}(name, symbol);
-        daoToken = address(token);
+        baoToken = address(token);
         require(address(token) < WETH, "Invalid salt");
-        // Mint and distribute tokens to all contributors
+
+        // Mint tokens to contributors
         for (uint256 i = 0; i < contributors.length; i++) {
             address contributor = contributors[i];
             uint256 contribution = contributions[contributor];
             uint256 tokensToMint = (contribution * SUPPLY_TO_FUNDRAISERS) / totalRaised;
-
             token.mint(contributor, tokensToMint);
         }
 
         emit FundraisingFinalized(true);
         fundraisingFinalized = true;
 
-        // setup the uniswap v3 pool
+        // Setup Uniswap V3 pool with single-sided liquidity
         uint160 sqrtPriceX96 = initialTick.getSqrtRatioAtTick();
         address pool = UNISWAP_V3_FACTORY.createPool(address(token), WETH, UNI_V3_FEE);
         IUniswapV3Factory(pool).initialize(sqrtPriceX96);
 
-        INonfungiblePositionManager.MintParams memory params = INonfungiblePositionManager.MintParams(
-            address(token),
-            WETH,
-            UNI_V3_FEE,
-            initialTick,
-            upperTick,
-            SUPPLY_TO_LP,
-            0,
-            0,
-            0,
-            address(this),
-            block.timestamp
-        );
+        // Create single-sided LP position for each contributor
+        for (uint256 i = 0; i < contributors.length; i++) {
+            address contributor = contributors[i];
+            uint256 contribution = contributions[contributor];
+            uint256 lpAmount = (contribution * SUPPLY_TO_LP) / totalRaised;
 
-        // mint 100M more tokens for LP
-        token.mint(address(this), SUPPLY_TO_LP);
-        // transfer ownership to 0 address so no more tokens can be minted
+            INonfungiblePositionManager.MintParams memory params = INonfungiblePositionManager.MintParams(
+                address(token),
+                WETH,
+                UNI_V3_FEE,
+                initialTick,
+                upperTick,
+                lpAmount,
+                0,  // No ETH/BERA provided
+                0,  // Min token amount (not needed for single-sided)
+                0,  // Min ETH/BERA amount (not needed for single-sided)
+                address(this),
+                block.timestamp
+            );
+
+            token.mint(address(this), lpAmount);
+            token.approve(address(POSITION_MANAGER), lpAmount);
+            
+            // Mint single-sided LP position
+            (uint256 tokenId,,,) = POSITION_MANAGER.mint(params);
+
+            // Store LP position data
+            lpPositionOwner[tokenId] = contributor;
+            lpPositionTier[tokenId] = contributorTiers[i];
+            uint256 lockExpiry = block.timestamp + tierLockPeriods[contributorTiers[i]];
+            lpPositionLockExpiry[tokenId] = lockExpiry;
+
+            // Lock in HoneyLocker
+            POSITION_MANAGER.approve(address(honeyLocker), tokenId);
+            honeyLocker.depositAndLock(address(POSITION_MANAGER), tokenId, lockExpiry);
+
+            emit LPPositionLocked(tokenId, contributor, contributorTiers[i], lockExpiry);
+        }
+
+        // Transfer ownership to 0 address so no more tokens can be minted
         token.renounceOwnership();
-
-        token.approve(address(POSITION_MANAGER), SUPPLY_TO_LP);
-        (uint256 tokenId,,,) = POSITION_MANAGER.mint(params);
-
-        address lockerAddress = liquidityLockerFactory.deploy(
-            address(POSITION_MANAGER), owner(), uint64(fundExpiry), tokenId, lpFeesCut, address(this)
-        );
-
-        POSITION_MANAGER.safeTransferFrom(address(this), lockerAddress, tokenId);
-
-        ILocker(lockerAddress).initializer(tokenId);
-        liquidityLocker = lockerAddress;
     }
 
     // Allow contributors to get a refund if the goal is not reached
@@ -267,5 +320,101 @@ contract DaosWorldV1 is Ownable, ReentrancyGuard {
 
     function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
         return IERC721Receiver.onERC721Received.selector;
+    }
+
+    // Function to unstake LP position after lock period
+    function unstakeLP(uint256 tokenId) external nonReentrant {
+        require(lpPositionOwner[tokenId] == msg.sender, "Not the LP position owner");
+        require(block.timestamp >= lpPositionLockExpiry[tokenId], "Lock period not expired");
+
+        // Withdraw from HoneyLocker
+        honeyLocker.withdraw(address(POSITION_MANAGER), tokenId);
+        
+        // Transfer LP token to owner
+        POSITION_MANAGER.safeTransferFrom(address(this), msg.sender, tokenId);
+        
+        // Clear position data
+        delete lpPositionOwner[tokenId];
+        delete lpPositionTier[tokenId];
+        delete lpPositionLockExpiry[tokenId];
+
+        emit LPUnstaked(tokenId, msg.sender);
+    }
+
+    // Function to claim rewards from HoneyLocker
+    function claimRewards(uint256 tokenId) external nonReentrant {
+        require(lpPositionOwner[tokenId] == msg.sender, "Not the LP position owner");
+        
+        // Get pending rewards
+        uint256 rewards = honeyLocker.getPendingRewards(tokenId);
+        require(rewards > 0, "No rewards to claim");
+
+        // Claim rewards from HoneyLocker
+        honeyLocker.claimRewards(tokenId);
+        
+        // Transfer rewards to user
+        (bool success,) = payable(msg.sender).call{value: rewards}("");
+        require(success, "Reward transfer failed");
+
+        emit RewardsClaimed(msg.sender, rewards);
+    }
+
+    // Function to burn BAO tokens for BERA
+    function burnForBERA(uint256 baoAmount) external nonReentrant {
+        require(baoAmount > 0, "Amount must be greater than 0");
+        
+        // Get BAO token contract
+        DaosWorldV1Token token = DaosWorldV1Token(baoToken);
+        require(token.balanceOf(msg.sender) >= baoAmount, "Insufficient BAO balance");
+
+        // Calculate BERA amount based on current pool price
+        uint256 beraAmount = calculateBERAAmount(baoAmount);
+        require(address(this).balance >= beraAmount, "Insufficient BERA in contract");
+
+        // Burn BAO tokens
+        token.burnFrom(msg.sender, baoAmount);
+
+        // Transfer BERA to user
+        (bool success,) = payable(msg.sender).call{value: beraAmount}("");
+        require(success, "BERA transfer failed");
+
+        emit TokensBurned(msg.sender, baoAmount, beraAmount);
+    }
+
+    // Helper function to calculate BERA amount for burning BAO
+    function calculateBERAAmount(uint256 baoAmount) public view returns (uint256) {
+        // Get current pool price from Uniswap
+        address pool = UNISWAP_V3_FACTORY.getPool(baoToken, WETH, UNI_V3_FEE);
+        require(pool != address(0), "Pool does not exist");
+
+        // Calculate based on pool reserves and price
+        // This is a simplified calculation - you may want to use TWAP or other price oracle
+        uint256 beraAmount = (baoAmount * getPoolPrice(pool)) / 1e18;
+        return beraAmount;
+    }
+
+    // Helper function to get pool price
+    function getPoolPrice(address pool) internal view returns (uint256) {
+        // Implement price calculation based on pool reserves
+        // This is a placeholder - implement actual price calculation logic
+        return 1e18; // 1:1 price for example
+    }
+
+    // Function to delegate BAO tokens to a validator through HoneyLocker
+    function delegateBAO(uint128 amount, address validator) external nonReentrant {
+        require(amount > 0, "Amount must be greater than 0");
+        require(validator != address(0), "Invalid validator address");
+        
+        // Get BAO token contract
+        DaosWorldV1Token token = DaosWorldV1Token(baoToken);
+        require(token.balanceOf(msg.sender) >= amount, "Insufficient BAO balance");
+
+        // Transfer BAO tokens from user to HoneyLocker
+        token.transferFrom(msg.sender, address(honeyLocker), amount);
+        
+        // Delegate tokens to validator through HoneyLocker
+        honeyLocker.delegateBGT(amount, validator);
+
+        emit BAODelegated(msg.sender, amount, validator);
     }
 }

@@ -151,6 +151,7 @@ model BAO {
   // Timestamps
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
+  lpPositions   BAOLPPosition[]  // Add relation to LP positions
 
   @@index([seasonId])
 }
@@ -188,7 +189,8 @@ model BAOWhitelist {
   user             User            @relation(fields: [userId], references: [id])
   userId           String
   status           WhitelistStatus          // Application status
-  tier             WhitelistTier            // Assigned tier
+  tier             Int         @default(1) // Tier level 1-5
+  lpLockDays       Int         @default(1) // Number of days to lock LP
   
   // Tier qualification metrics
   protocolActivity Float?                   // Protocol engagement score
@@ -228,6 +230,7 @@ model User {
   baoWhitelists BAOWhitelist[]         // User's whitelist applications
   baoStaking    BAOStaking[]           // User's staking positions
   chatMessages  ChatMessage[]          // Alpha chat messages
+  lpPositions   BAOLPPosition[]  // Add relation to LP positions
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 }
@@ -333,4 +336,22 @@ model ChatMessage {
   @@index([baoId])
   @@index([userId])
   @@index([agentId])
+}
+
+// Track LP positions and their lock status
+model BAOLPPosition {
+  id            String    @id @default(uuid())
+  bao           BAO       @relation(fields: [baoId], references: [id])
+  baoId         String
+  user          User      @relation(fields: [userId], references: [id])
+  userId        String
+  tokenId       BigInt    // Uniswap V3 NFT position ID
+  lockExpiry    DateTime  // When the LP lock expires
+  isLocked      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([baoId])
+  @@index([userId])
+  @@unique([tokenId]) // Each Uniswap V3 position is unique
 }
