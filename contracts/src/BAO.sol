@@ -5,7 +5,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {TickMath} from "@uniswap/v3-core/contracts/libraries/TickMath.sol";
-import {INonfungiblePositionManager} from "./interfaces/INonfungiblePositionManager.sol";
+import {INonfungiblePositionManager} from "./interfaces/interface.sol";
 import {IUniswapV3Factory} from "./interfaces/interface.sol";
 import {IHoneyLocker} from "./interfaces/IHoneyLocker.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
@@ -263,17 +263,30 @@ contract BAO is Ownable, ReentrancyGuard {
                 deadline: block.timestamp + 1 hours
             });
             
-            (uint256 tokenId,,,) = POSITION_MANAGER.mint(params);
+            (uint256 tokenId, uint128 liquidity,,) = POSITION_MANAGER.mint(params);
+
+            // Calculate pBAO amount based on liquidity
+            uint256 pBAOToMint = uint256(liquidity);  // 1:1 ratio of liquidity to pBAO
+
+            // Mint pBAO tokens
+            pBAO.mint(address(this), pBAOToMint);
 
             // Lock LP token in lpLocker
             uint256 lockExpiry = block.timestamp + tierLockPeriods[contributorTiers[i]];
-            POSITION_MANAGER.approve(address(lpLocker), tokenId);
+            
+            // Transfer LP NFT to locker
+            POSITION_MANAGER.safeTransferFrom(address(this), address(lpLocker), tokenId);
             lpLocker.depositAndLock(address(POSITION_MANAGER), tokenId, lockExpiry);
+
+            // Lock pBAO tokens in pBAOLocker
+            ERC20(address(pBAO)).approve(address(pBAOLocker), pBAOToMint);
+            pBAOLocker.depositAndLock(address(pBAO), pBAOToMint, lockExpiry);
 
             // Store the pBAO amount corresponding to this LP position
             lpToPBAOAmount[tokenId] = pBAOToMint;
 
             emit LPPositionLocked(tokenId, contributor, contributorTiers[i], lockExpiry);
+            emit PBAOLocked(contributor, pBAOToMint, lockExpiry);
         }
 
         emit FundraisingFinalized(true);
@@ -342,9 +355,9 @@ contract BAO is Ownable, ReentrancyGuard {
      * @notice Unstake both LP tokens and corresponding pBAO tokens from their respective HoneyLockers
      * @param tokenId The ID of the LP token to unstake
      */
-    function unstakeTokens(uint256 tokenId) external nonReentrant {
+    function unstakeTokens(uint256 tokenId, address lpStakingContract, address pBAOStakingContract) external nonReentrant {
         // Check if caller is the original owner of the LP position
-        (address owner,,,,,,) = POSITION_MANAGER.positions(tokenId);
+        (address owner,,,,,,,,,, ) = POSITION_MANAGER.positions(tokenId);
         require(msg.sender == owner, "Not the LP token owner");
 
         // Get the amount of pBAO tokens corresponding to this LP position
@@ -354,9 +367,9 @@ contract BAO is Ownable, ReentrancyGuard {
         // First unstake LP tokens from lpLocker
         lpLocker.unstake(
             address(POSITION_MANAGER), 
-            address(lpLocker),  // staking contract is the locker itself
+            lpStakingContract,
             tokenId, 
-            ""  // no additional data needed
+            ""
         );
 
         // Then withdraw LP tokens
@@ -365,9 +378,9 @@ contract BAO is Ownable, ReentrancyGuard {
         // First unstake pBAO tokens from pBAOLocker
         pBAOLocker.unstake(
             address(pBAO),
-            address(pBAOLocker),  // staking contract is the locker itself
+            pBAOStakingContract,
             pBAOAmount,
-            ""  // no additional data needed
+            ""
         );
 
         // Then withdraw pBAO tokens
