@@ -35,7 +35,7 @@ contract BAO is Ownable, ReentrancyGuard {
     // Immutables
     IUniswapV3Factory public immutable KODIAK_FACTORY;
     INonfungiblePositionManager public immutable POSITION_MANAGER;
-    address public immutable WETH;
+    address public immutable WBERA;  // Wrapped BERA
     IHoneyLocker public immutable lpLocker;    // HoneyLocker for LP tokens
     IHoneyLocker public immutable pBAOLocker;  // HoneyLocker for pBAO tokens
     PBAO public immutable pBAO;                // pBAO token contract
@@ -54,6 +54,9 @@ contract BAO is Ownable, ReentrancyGuard {
 
     // Track LP token ID to pBAO amount mapping
     mapping(uint256 => uint256) public lpToPBAOAmount;  // tokenId => pBAO amount
+
+    // Track LP token ID to lock expiry mapping
+    mapping(uint256 => uint256) public lpLockExpiry;  // tokenId => lock expiry timestamp
 
     // Tier lock periods (in seconds)
     mapping(uint256 => uint256) public tierLockPeriods;
@@ -85,7 +88,7 @@ contract BAO is Ownable, ReentrancyGuard {
         address _daoManager,
         address _kodiakFactory,
         address _positionManager,
-        address _weth,
+        address _wbera,
         address _lpLocker,
         address _pBAOLocker,
         address _pBAO,
@@ -108,7 +111,7 @@ contract BAO is Ownable, ReentrancyGuard {
 
         KODIAK_FACTORY = IUniswapV3Factory(_kodiakFactory);
         POSITION_MANAGER = INonfungiblePositionManager(_positionManager);
-        WETH = _weth;
+        WBERA = _wbera;
         lpLocker = IHoneyLocker(_lpLocker);
         pBAOLocker = IHoneyLocker(_pBAOLocker);
         pBAO = PBAO(_pBAO);
@@ -213,7 +216,7 @@ contract BAO is Ownable, ReentrancyGuard {
         // 1. Create BAO token
         BAOSDOTFUNV1TOKEN token = new BAOSDOTFUNV1TOKEN{salt: salt}(name, symbol);
         baoToken = address(token);
-        require(address(token) < WETH, "Invalid salt");
+        require(address(token) < WBERA, "Invalid salt");
 
         // 2. Mint tokens to contributors
         for (uint256 i = 0; i < contributors.length; i++) {
@@ -236,7 +239,7 @@ contract BAO is Ownable, ReentrancyGuard {
 
         // 3. Setup Kodiak pool with single-sided liquidity
         uint160 sqrtPriceX96 = initialTick.getSqrtRatioAtTick();
-        address pool = KODIAK_FACTORY.createPool(address(token), WETH, KODIAK_FEE);
+        address pool = KODIAK_FACTORY.createPool(address(token), WBERA, KODIAK_FEE);
         IUniswapV3Factory(pool).initialize(sqrtPriceX96);
 
         // 4. Create and lock LP positions for each contributor
@@ -251,7 +254,7 @@ contract BAO is Ownable, ReentrancyGuard {
             // Create LP position
             INonfungiblePositionManager.MintParams memory params = INonfungiblePositionManager.MintParams({
                 token0: address(token),
-                token1: WETH,
+                token1: WBERA,
                 fee: KODIAK_FEE,
                 tickLower: initialTick,
                 tickUpper: upperTick,
@@ -271,19 +274,20 @@ contract BAO is Ownable, ReentrancyGuard {
             // Mint pBAO tokens
             pBAO.mint(address(this), pBAOToMint);
 
-            // Lock LP token in lpLocker
-            uint256 lockExpiry = block.timestamp + tierLockPeriods[contributorTiers[i]];
-            
-            // Transfer LP NFT to locker
-            POSITION_MANAGER.safeTransferFrom(address(this), address(lpLocker), tokenId);
-            lpLocker.depositAndLock(address(POSITION_MANAGER), tokenId, lockExpiry);
-
             // Lock pBAO tokens in pBAOLocker
+            uint256 lockExpiry = block.timestamp + tierLockPeriods[contributorTiers[i]];
             ERC20(address(pBAO)).approve(address(pBAOLocker), pBAOToMint);
             pBAOLocker.depositAndLock(address(pBAO), pBAOToMint, lockExpiry);
 
-            // Store the pBAO amount corresponding to this LP position
+            // Store LP token ID to pBAO amount mapping
             lpToPBAOAmount[tokenId] = pBAOToMint;
+
+            // Store lock expiry
+            lpLockExpiry[tokenId] = lockExpiry;
+
+            // Lock LP tokens in lpLocker
+            POSITION_MANAGER.safeTransferFrom(address(this), address(lpLocker), tokenId);
+            lpLocker.depositAndLock(address(POSITION_MANAGER), tokenId, lockExpiry);
 
             emit LPPositionLocked(tokenId, contributor, contributorTiers[i], lockExpiry);
             emit PBAOLocked(contributor, pBAOToMint, lockExpiry);
@@ -356,38 +360,27 @@ contract BAO is Ownable, ReentrancyGuard {
      * @param tokenId The ID of the LP token to unstake
      */
     function unstakeTokens(uint256 tokenId, address lpStakingContract, address pBAOStakingContract) external nonReentrant {
-        // Check if caller is the original owner of the LP position
-        (address owner,,,,,,,,,, ) = POSITION_MANAGER.positions(tokenId);
-        require(msg.sender == owner, "Not the LP token owner");
+        // Check ownership
+        (address operator,,,,,,,,,, ) = POSITION_MANAGER.positions(tokenId);
+        require(operator == msg.sender, "Not the LP token owner");
 
-        // Get the amount of pBAO tokens corresponding to this LP position
+        // Check lock period
+        require(block.timestamp >= lpLockExpiry[tokenId], "Lock period not ended");
+
+        // Get pBAO amount for this LP token
         uint256 pBAOAmount = lpToPBAOAmount[tokenId];
-        require(pBAOAmount > 0, "No pBAO tokens found for this LP");
 
-        // First unstake LP tokens from lpLocker
-        lpLocker.unstake(
-            address(POSITION_MANAGER), 
-            lpStakingContract,
-            tokenId, 
-            ""
-        );
-
-        // Then withdraw LP tokens
+        // Unstake and withdraw LP tokens
+        lpLocker.unstake(address(POSITION_MANAGER), lpStakingContract, tokenId, "");
         lpLocker.withdrawLPToken(address(POSITION_MANAGER), tokenId);
 
-        // First unstake pBAO tokens from pBAOLocker
-        pBAOLocker.unstake(
-            address(pBAO),
-            pBAOStakingContract,
-            pBAOAmount,
-            ""
-        );
-
-        // Then withdraw pBAO tokens
+        // Unstake and withdraw pBAO tokens
+        pBAOLocker.unstake(address(pBAO), pBAOStakingContract, pBAOAmount, "");
         pBAOLocker.withdrawLPToken(address(pBAO), pBAOAmount);
 
-        // Clear the mapping
-        delete lpToPBAOAmount[tokenId];
+        // Clear mappings
+        lpToPBAOAmount[tokenId] = 0;
+        lpLockExpiry[tokenId] = 0;
 
         emit TokensUnstaked(tokenId, msg.sender, pBAOAmount);
     }

@@ -93,4 +93,10 @@ interface IHoneyLocker {
     /// @notice Activates a boost for a validator
     /// @param _validator The address of the validator
     function activateBoost(address _validator) external;
+ 
+    /// @notice Gets the lock expiry timestamp for a given token
+    /// @param _LPToken The address of the LP token
+    /// @param _amountOrId The amount or ID of the LP token
+    /// @return The lock expiry timestamp
+    function getLockExpiry(address _LPToken, uint256 _amountOrId) external view returns (uint256);
 }
